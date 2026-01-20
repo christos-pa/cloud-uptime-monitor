@@ -73,6 +73,16 @@ At this stage, the focus has been understanding and validating the architecture 
 
 ---
 
+## Evidence
+
+Screenshots of the running system and failure scenarios are available in the `/docs` folder, including:
+- EC2 instance with Elastic IP
+- CloudWatch logs showing successful checks
+- CloudWatch logs showing failure when Apache was stopped
+- SNS email alert delivery
+
+---
+
 ## Next steps
 
 The next phase of this project is to convert the manual setup into Infrastructure as Code using Terraform or AWS SAM, allowing the entire system to be recreated predictably from source control.
