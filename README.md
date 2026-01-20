@@ -81,6 +81,8 @@ Screenshots of the running system and failure scenarios are available in the `/d
 - CloudWatch logs showing failure when Apache was stopped
 - SNS email alert delivery
 
+![CloudWatch failure detection](docs/cloudwatch-failure.png)
+
 ---
 
 ## Next steps
