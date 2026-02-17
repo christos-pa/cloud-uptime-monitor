@@ -1,85 +1,83 @@
 # AWS Uptime Monitor – DevOps Cloud Project
 
-This project is a cloud-based uptime monitoring system built on AWS.  
-Its purpose is simple: continuously check whether a public service is reachable, and notify me automatically when it is not.
+I built this to learn how AWS services actually work together — not by following a tutorial, but by designing something real, deploying it, and then deliberately breaking it to see what happened.
 
-I built this project to transition my existing local monitoring experience into a real cloud environment and to deeply understand how AWS services work together in a production-style setup.
-
-The system was designed, deployed, broken, observed, and recovered intentionally, to validate the full DevOps feedback loop.
+The idea is straightforward: an EC2 server runs a simple HTTP endpoint, and a Lambda function checks it on a schedule. If it goes down, I get an email. If it recovers, monitoring picks back up automatically.
 
 ---
 
 ## What the system does
 
-A Linux server running on AWS EC2 exposes a simple HTTP endpoint using Apache.  
-A serverless AWS Lambda function periodically sends HTTP requests to that endpoint.  
+A Linux server on AWS EC2 exposes a basic HTTP endpoint via Apache. A serverless Lambda function runs on a schedule and sends an HTTP request to that endpoint.
 
-If the request succeeds, the system logs the result and continues silently.  
-If the request fails, the system automatically sends an email alert.
+If the check succeeds, it logs the result and moves on.  
+If it fails, it fires an alert through SNS to my email.
 
-The checks run on a schedule without manual intervention, and all executions are logged for observability and troubleshooting.
+Every execution gets logged to CloudWatch — which turned out to be one of the more useful parts of the whole setup once I started actually reading the logs.
 
 ---
 
 ## Architecture overview
 
-The monitored service runs on an EC2 instance with Apache installed and a permanent Elastic IP attached. This instance represents a real, publicly reachable target that can fail and recover like a production system.
+```
+EventBridge (schedule)
+       |
+       v
+  Lambda function  ──── HTTP check ────>  EC2 / Apache
+       |
+    on failure
+       |
+       v
+   SNS Topic  ──>  Email Alert
+       |
+       v
+  CloudWatch Logs
+```
 
-An EventBridge schedule acts as the time trigger. It invokes a Lambda function at a fixed interval.
+The EC2 instance has a static Elastic IP so the monitored endpoint doesn't change. Lambda does the actual checking — it spins up, runs the request, and exits. EventBridge is just the clock that kicks it off. When something fails, Lambda publishes to an SNS topic which handles the email delivery.
 
-The Lambda function performs the HTTP check against the EC2 endpoint. It does not maintain state and runs only for the duration of the check.
-
-When a failure is detected, the Lambda function publishes a message to an SNS topic.  
-SNS then delivers the alert to my email address.
-
-All Lambda executions and outcomes are recorded in CloudWatch Logs, allowing inspection of latency, status codes, and errors.
+IAM roles wire it all together with the minimum permissions needed for each piece to talk to the next.
 
 ---
 
-## How I validated the system
+## How I tested it
 
-The system was not considered complete until failure and recovery were proven.
+I didn't consider the project done until I'd seen it fail and recover.
 
-Apache was intentionally stopped on the EC2 instance to simulate an outage.  
-The monitoring function detected the failure and sent an alert email.
+I SSHed into the EC2 instance and stopped Apache manually. On the next scheduled Lambda run, it detected the failure and an alert email landed in my inbox. I restarted Apache, and the following check came back healthy with no further alerts.
 
-Apache was then restarted, the endpoint recovered, and subsequent checks returned to a healthy state without further alerts.
-
-This confirmed that monitoring, alerting, and recovery all functioned correctly end-to-end.
+It sounds simple, but actually watching that sequence happen — the failure, the alert, the recovery — made the architecture feel real in a way that just deploying it didn't.
 
 ---
 
 ## What I learned
 
-This project helped solidify the mental separation between core AWS services:
+Going in, I had a rough sense of what EC2 and Lambda were. Coming out, I actually understand how they're different and why that matters.
 
-EC2 as a long-running server that I manage directly.  
-Lambda as a short-lived, stateless execution environment.  
-EventBridge as a scheduling and orchestration mechanism.  
-SNS as a decoupled notification delivery service.
+EC2 is a server you keep running and manage. Lambda is something that runs for a moment and disappears. EventBridge is just a scheduler. SNS handles delivery so Lambda doesn't have to care where the alert goes. CloudWatch is where you look when something isn't behaving.
 
-Beyond individual services, the key learning was architectural: monitoring should be external to the system being monitored, automated, observable, and able to fail independently.
+The bigger architectural lesson was that monitoring needs to live outside the thing it's watching. If my Lambda function was running on the same EC2 instance it was checking, a crash would take both down at once. Keeping them separate is the point.
 
-I also gained hands-on experience with IAM permissions, cloud networking concepts such as public IPs and ports, and CloudWatch as an operational visibility tool.
+IAM permissions were also more involved than I expected. Getting the Lambda role scoped correctly — enough access to publish to SNS and write to CloudWatch, nothing more — took a few iterations.
 
 ---
 
 ## Current state
 
-The system is fully functional and deployed manually through the AWS Console.  
-It successfully performs scheduled uptime checks, logs results, and sends alerts on failure.
+The infrastructure is fully defined in Terraform under `infra/terraform/`. The entire stack — EC2, Lambda, EventBridge, SNS, IAM, CloudWatch — can be provisioned from scratch with `terraform apply` and torn down cleanly with `terraform destroy`.
 
-At this stage, the focus has been understanding and validating the architecture rather than automation.
+The project started as a manual AWS Console build. Converting it to IaC was the second phase, and the difference in confidence between "I clicked through the console once" and "I can recreate this exactly, any time" is significant.
 
 ---
 
 ## Evidence
 
-Screenshots of the running system and failure scenarios are available in the `/docs` folder, including:
+Screenshots from the running system are in the `/docs` folder:
+
 - EC2 instance with Elastic IP
-- CloudWatch logs showing successful checks
-- CloudWatch logs showing failure when Apache was stopped
-- SNS email alert delivery
+- CloudWatch logs from successful checks
+- CloudWatch logs showing the failure when Apache was stopped
+- The SNS alert email
 
 ![CloudWatch failure detection](docs/cloudwatch-failure.png)
 
@@ -87,13 +85,14 @@ Screenshots of the running system and failure scenarios are available in the `/d
 
 ## Next steps
 
-The next phase of this project is to convert the manual setup into Infrastructure as Code using Terraform or AWS SAM, allowing the entire system to be recreated predictably from source control.
-
-Planned improvements also include reducing alert noise through failure thresholds and extending the monitor to support multiple targets.
+- Failure thresholds — right now it alerts on the first failed check, which isn't great for transient issues. Adding a consecutive-failure threshold would reduce noise.
+- Multi-target monitoring — the architecture supports it, just needs parameterising.
+- GitHub Actions — a basic CI workflow to run `terraform fmt` and `terraform validate` on PRs.
 
 ---
 
 ## Why this project exists
 
-This project is not a tutorial copy or a simulated exercise.  
-It represents a deliberate transition from local automation tools into cloud-native DevOps practices, with an emphasis on understanding, observability, and operational correctness.
+I wanted to stop running things locally and actually understand what cloud infrastructure feels like when you have to think about networking, permissions, observability, and failure modes.
+
+This project did that.
